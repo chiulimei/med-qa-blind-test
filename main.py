@@ -3,7 +3,6 @@ import pandas as pd
 import random
 import io
 
-
 if 'initialized' not in st.session_state:
     df = pd.read_excel("3種回答_3.xlsx")
 
@@ -19,7 +18,6 @@ if 'initialized' not in st.session_state:
     st.session_state.current_shuffled_ans = None
     st.session_state.next_rank_to_assign = 1  # 下一個要分配的名次（1, 2, 或 3）
     st.session_state.initialized = True
-
 
 df = st.session_state.df
 pointer = st.session_state.current_pointer
@@ -141,20 +139,24 @@ if pointer < total_questions:
         st.rerun()
 
 else:
+    # 藥師做完題目後看到的乾淨畫面
     st.success("所有測試已完成，辛苦藥師了！")
 
-    result_df = pd.DataFrame(st.session_state.results)
+    # 檢查網址列參數，只有當網址最後帶有 ?admin=true 時才渲染後台下載按鈕
+    if st.query_params.get("admin") == "true":
+        st.markdown("---")
+        st.markdown("### 管理員後台數據下載")
 
-    st.markdown("### 後台統計結果預覽")
-    st.dataframe(result_df)
+        result_df = pd.DataFrame(st.session_state.results)
+        st.dataframe(result_df)
 
-    buffer = io.BytesIO()
-    with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-        result_df.to_excel(writer, index=False, sheet_name='盲測結果')
+        buffer = io.BytesIO()
+        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+            result_df.to_excel(writer, index=False, sheet_name='盲測結果')
 
-    st.download_button(
-        label="點我下載盲測結果 Excel 報表",
-        data=buffer.getvalue(),
-        file_name="盲測實驗結果.xlsx",
-        mime="application/vnd.ms-excel"
-    )
+        st.download_button(
+            label="點我下載盲測結果 Excel 報表",
+            data=buffer.getvalue(),
+            file_name="盲測實驗結果.xlsx",
+            mime="application/vnd.ms-excel"
+        )
