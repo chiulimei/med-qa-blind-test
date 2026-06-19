@@ -2,6 +2,8 @@ import streamlit as st
 import pandas as pd
 import random
 import io
+import requests
+import base64
 
 if 'initialized' not in st.session_state:
     df = pd.read_excel("3種回答_3.xlsx")
@@ -18,6 +20,7 @@ if 'initialized' not in st.session_state:
     st.session_state.current_shuffled_ans = None
     st.session_state.next_rank_to_assign = 1  # 下一個要分配的名次（1, 2, 或 3）
     st.session_state.initialized = True
+    st.session_state.uploaded_to_github = False  # 防止重複觸發上傳
 
 
 df = st.session_state.df
@@ -54,7 +57,6 @@ if pointer < total_questions:
     if num_clicks > 0:
         st.markdown("### 目前排定名次：")
         for clicked_ans in st.session_state.current_clicks:
-            # 這裡也讓它支援換行預覽
             st.success(f"第 {clicked_ans['rank']} 名 ➔ [{clicked_ans['model'] if False else '盲測文本'}]")
             st.text(clicked_ans['text'])
 
@@ -80,15 +82,10 @@ if pointer < total_questions:
         is_already_clicked = any(c['model'] == choice['model'] for c in st.session_state.current_clicks)
 
         if not is_already_clicked:
-            # 使用橫向欄位，左邊放答案按鈕，右邊放並列按鈕
             c_btn, c_tie = st.columns([4, 1])
 
             with c_btn:
-                # 換行修正核心：利用「\n」切分，並透過 streamlit 按鈕文字的多行格式渲染
-                # 同時確保按鈕內部的 CSS 允許換行
                 button_text = f"選項 {idx + 1}：\n\n{choice['text']}"
-                
-                # 這裡使用特殊技巧確保按鈕內的大段文字能夠自動換行，不會縮成一行
                 st.markdown("""
                     <style>
                     div.stButton > button p {
@@ -109,7 +106,6 @@ if pointer < total_questions:
 
             with c_tie:
                 if num_clicks > 0:
-                    # 為了視覺對齊，稍微往下推一點點
                     st.write("") 
                     if st.button("與前項並列", key=f"tie_{pointer}_{choice['model']}", use_container_width=True):
                         last_assigned_rank = st.session_state.current_clicks[-1]["rank"]
@@ -122,10 +118,8 @@ if pointer < total_questions:
                         st.session_state.next_rank_to_assign = unique_ranks + 1
                         st.rerun()
 
-    # 如果已經點滿 3 個答案，自動整理數據並儲存，然後跳題
     if len(st.session_state.current_clicks) == 3:
         clicks = st.session_state.current_clicks
-
         rank_dict = {c["model"]: c["rank"] for c in clicks}
         text_dict = {c["model"]: c["text"] for c in clicks}
 
@@ -148,21 +142,53 @@ if pointer < total_questions:
 
 else:
     st.success("所有測試已完成，辛苦藥師了！")
-
-    if True:
-        st.markdown("---")
-        st.markdown("### 管理員後台數據下載")
-        
-        result_df = pd.DataFrame(st.session_state.results)
-        st.dataframe(result_df)
-
-        buffer = io.BytesIO()
-        with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
-            result_df.to_excel(writer, index=False, sheet_name='盲測結果')
-
-        st.download_button(
-            label="點我下載盲測結果 Excel 報表",
-            data=buffer.getvalue(),
-            file_name="盲測實驗結果.xlsx",
-            mime="application/vnd.ms-excel"
-        )
+    
+    # 方案 B 核心邏輯：做完當下，自動將資料轉成 Excel 並上傳回 GitHub 備份
+    if not st.session_state.uploaded_to_github:
+        with st.spinner("系統正在安全儲存盲測數據，請稍候..."):
+            try:
+                result_df = pd.DataFrame(st.session_state.results)
+                
+                # 將 Excel 寫入記憶體 buffer
+                buffer = io.BytesIO()
+                with pd.ExcelWriter(buffer, engine='openpyxl') as writer:
+                    result_df.to_excel(writer, index=False, sheet_name='盲測結果')
+                excel_data = buffer.getvalue()
+                
+                # GitHub API 參數配置
+                REPO = "chiulimei/med-qa-blind-test"
+                # 我們把檔案命名為「盲測實驗結果.xlsx」直接放回專案根目錄
+                FILE_PATH = "盲測實驗結果.xlsx" 
+                TOKEN = st.secrets["GITHUB_TOKEN"]
+                
+                url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
+                headers = {
+                    "Authorization": f"token {TOKEN}",
+                    "Accept": "application/vnd.github.v3+json"
+                }
+                
+                # 檢查 GitHub 上是否本來就存在該檔案（若有，需取得它的 sha 才能覆蓋）
+                res = requests.get(url, headers=headers)
+                sha = None
+                if res.status_code == 200:
+                    sha = res.json().get("sha")
+                
+                # 準備上傳的 Payload
+                payload = {
+                    "message": "Auto-save blind test results via Streamlit",
+                    "content": base64.b64encode(excel_data).decode("utf-8"),
+                    "branch": "main"
+                }
+                if sha:
+                    payload["sha"] = sha
+                    
+                # 發送 PUT 請求給 GitHub 自動更新檔案
+                put_res = requests.put(url, headers=headers, json=payload)
+                
+                if put_res.status_code in [200, 201]:
+                    st.session_state.uploaded_to_github = True
+                    st.toast("盲測數據已成功自動備份至 GitHub 儲存庫！", icon="💾")
+                else:
+                    st.error(f"自動儲存失敗，請聯繫工程師。錯誤代碼: {put_res.status_code}")
+            except Exception as e:
+                st.error(f"儲存過程中發生未預期錯誤: {e}")
