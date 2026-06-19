@@ -149,7 +149,7 @@ if pointer < total_questions:
 else:
     st.success("所有測試已完成，辛苦藥師了！")
 
-    if st.query_params.get("admin") == "true":
+    if True:
         st.markdown("---")
         st.markdown("### 管理員後台數據下載")
         
