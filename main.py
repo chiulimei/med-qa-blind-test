@@ -14,10 +14,11 @@ if 'initialized' not in st.session_state:
     st.session_state.problem_indices = problem_indices
     st.session_state.current_pointer = 0
     st.session_state.results = []
-    st.session_state.current_clicks = []  # 格式改為: [{"model": m, "text": t, "rank": r}]
+    st.session_state.current_clicks = []  # 格式為: [{"model": m, "text": t, "rank": r}]
     st.session_state.current_shuffled_ans = None
     st.session_state.next_rank_to_assign = 1  # 下一個要分配的名次（1, 2, 或 3）
     st.session_state.initialized = True
+
 
 df = st.session_state.df
 pointer = st.session_state.current_pointer
@@ -53,8 +54,9 @@ if pointer < total_questions:
     if num_clicks > 0:
         st.markdown("### 目前排定名次：")
         for clicked_ans in st.session_state.current_clicks:
-            st.success(
-                f"第 {clicked_ans['rank']} 名 ➔ [{clicked_ans['model'] if False else '盲測文本'}] {clicked_ans['text'][:30]}...")
+            # 這裡也讓它支援換行預覽
+            st.success(f"第 {clicked_ans['rank']} 名 ➔ [{clicked_ans['model'] if False else '盲測文本'}]")
+            st.text(clicked_ans['text'])
 
         col1, col2 = st.columns(2)
         with col1:
@@ -82,32 +84,40 @@ if pointer < total_questions:
             c_btn, c_tie = st.columns([4, 1])
 
             with c_btn:
-                # 正常點擊，分配下一個名次
-                if st.button(f"選項 {idx + 1}：\n\n{choice['text']}", key=f"btn_{pointer}_{choice['model']}",
-                             use_container_width=True):
+                # 換行修正核心：利用「\n」切分，並透過 streamlit 按鈕文字的多行格式渲染
+                # 同時確保按鈕內部的 CSS 允許換行
+                button_text = f"選項 {idx + 1}：\n\n{choice['text']}"
+                
+                # 這裡使用特殊技巧確保按鈕內的大段文字能夠自動換行，不會縮成一行
+                st.markdown("""
+                    <style>
+                    div.stButton > button p {
+                        white-space: pre-line !important;
+                    }
+                    </style>
+                """, unsafe_allow_html=True)
+
+                if st.button(button_text, key=f"btn_{pointer}_{choice['model']}", use_container_width=True):
                     current_rank = st.session_state.next_rank_to_assign
                     st.session_state.current_clicks.append({
                         "model": choice["model"],
                         "text": choice["text"],
                         "rank": current_rank
                     })
-                    # 正常點擊後，下一個名次往下加 1
                     st.session_state.next_rank_to_assign += 1
                     st.rerun()
 
             with c_tie:
-                # 只有當藥師已經點了至少一個答案時，才允許剩下的答案選擇「與前項並列」
                 if num_clicks > 0:
+                    # 為了視覺對齊，稍微往下推一點點
+                    st.write("") 
                     if st.button("與前項並列", key=f"tie_{pointer}_{choice['model']}", use_container_width=True):
-                        # 並列名次 = 上一次分出去的名次
                         last_assigned_rank = st.session_state.current_clicks[-1]["rank"]
                         st.session_state.current_clicks.append({
                             "model": choice["model"],
                             "text": choice["text"],
                             "rank": last_assigned_rank
                         })
-                        # 因為是並列，所以下一個名次不需要加 1（例如：1、2、2，下一個就是 3）
-                        # 但如果是 1、1，下一個名次要變成 2
                         unique_ranks = len(set(c['rank'] for c in st.session_state.current_clicks))
                         st.session_state.next_rank_to_assign = unique_ranks + 1
                         st.rerun()
@@ -116,7 +126,6 @@ if pointer < total_questions:
     if len(st.session_state.current_clicks) == 3:
         clicks = st.session_state.current_clicks
 
-        # 為了方便你後台統計，我們直接根據模型名稱找出各自獲得的名次
         rank_dict = {c["model"]: c["rank"] for c in clicks}
         text_dict = {c["model"]: c["text"] for c in clicks}
 
@@ -131,7 +140,6 @@ if pointer < total_questions:
             "仿單+lexidrug_答案": text_dict["仿單+lexidrug"]
         })
 
-        # 重置狀態，進入下一題
         st.session_state.current_clicks = []
         st.session_state.current_shuffled_ans = None
         st.session_state.next_rank_to_assign = 1
@@ -139,14 +147,12 @@ if pointer < total_questions:
         st.rerun()
 
 else:
-    # 藥師做完題目後看到的乾淨畫面
     st.success("所有測試已完成，辛苦藥師了！")
 
-    # 檢查網址列參數，只有當網址最後帶有 ?admin=true 時才渲染後台下載按鈕
     if st.query_params.get("admin") == "true":
         st.markdown("---")
         st.markdown("### 管理員後台數據下載")
-
+        
         result_df = pd.DataFrame(st.session_state.results)
         st.dataframe(result_df)
 
