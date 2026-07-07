@@ -4,6 +4,7 @@ import random
 import io
 import requests
 import base64
+import datetime  # 引入時間模組，用來生成不重複的檔名
 
 if 'initialized' not in st.session_state:
     df = pd.read_excel("3種回答_3.xlsx")
@@ -143,7 +144,6 @@ if pointer < total_questions:
 else:
     st.success("所有測試已完成，辛苦藥師了！")
     
-    # 方案 B 核心邏輯：做完當下，自動將資料轉成 Excel 並上傳回 GitHub 備份
     if not st.session_state.uploaded_to_github:
         with st.spinner("系統正在安全儲存盲測數據，請稍候..."):
             try:
@@ -155,10 +155,16 @@ else:
                     result_df.to_excel(writer, index=False, sheet_name='盲測結果')
                 excel_data = buffer.getvalue()
                 
-                # GitHub API 參數配置
+                # ------ 💡 修改核心：生成唯一檔名與詳細的 Commit 訊息 ------
+                # 獲取當前時間字串 (例如: 20260707_154530)
+                timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                # 產生 4 位數隨機值防撞
+                rand_id = random.randint(1000, 9999)
+                
+                # 新的檔名格式：盲測結果_時間_隨機數.xlsx
+                FILE_PATH = f"盲測結果_{timestamp}_{rand_id}.xlsx" 
+                
                 REPO = "chiulimei/med-qa-blind-test"
-                # 我們把檔案命名為「盲測實驗結果.xlsx」直接放回專案根目錄
-                FILE_PATH = "盲測實驗結果.xlsx" 
                 TOKEN = st.secrets["GITHUB_TOKEN"]
                 
                 url = f"https://api.github.com/repos/{REPO}/contents/{FILE_PATH}"
@@ -167,22 +173,17 @@ else:
                     "Accept": "application/vnd.github.v3+json"
                 }
                 
-                # 檢查 GitHub 上是否本來就存在該檔案（若有，需取得它的 sha 才能覆蓋）
-                res = requests.get(url, headers=headers)
-                sha = None
-                if res.status_code == 200:
-                    sha = res.json().get("sha")
+                # 因為每個檔名都是全新且唯一的，所以不再需要去 GET 檢查有沒有舊的 sha
                 
-                # 準備上傳的 Payload
+                # 準備上傳的 Payload (Commit 訊息也加入時間與資料筆數，讓歷史紀錄一目了然)
                 payload = {
-                    "message": "Auto-save blind test results via Streamlit",
+                    "message": f"Auto-save {len(result_df)} blind test results at {timestamp}",
                     "content": base64.b64encode(excel_data).decode("utf-8"),
                     "branch": "main"
                 }
-                if sha:
-                    payload["sha"] = sha
+                # ------------------------------------------------------------
                     
-                # 發送 PUT 請求給 GitHub 自動更新檔案
+                # 發送 PUT 請求給 GitHub 自動創建新檔案
                 put_res = requests.put(url, headers=headers, json=payload)
                 
                 if put_res.status_code in [200, 201]:
